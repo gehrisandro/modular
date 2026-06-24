@@ -11,6 +11,8 @@ class ModuleRegistry
 {
 	protected ?Collection $modules = null;
 	
+	protected ?array $namespace_index = null;
+
 	public function __construct(
 		protected string $modules_path,
 		protected Closure $modules_loader,
@@ -44,18 +46,16 @@ class ModuleRegistry
 	
 	public function moduleForClass(string $fqcn): ?ModuleConfig
 	{
-		return $this->modules()->first(function(ModuleConfig $module) use ($fqcn) {
-			foreach ($module->namespaces as $namespace) {
-				if (Str::startsWith($fqcn, $namespace)) {
-					return true;
-				}
+		foreach ($this->namespaceIndex() as $namespace => $module) {
+			if (Str::startsWith($fqcn, $namespace)) {
+				return $module;
 			}
-			
-			return false;
-		});
+		}
+		
+		return null;
 	}
 	
-	/** @return Collection<int, \InterNACHI\Modular\Support\ModuleConfig> */
+	/** @return Collection<int, ModuleConfig> */
 	public function modules(): Collection
 	{
 		return $this->modules ??= call_user_func($this->modules_loader);
@@ -64,8 +64,22 @@ class ModuleRegistry
 	public function reload(): Collection
 	{
 		$this->modules = null;
+		$this->namespace_index = null;
 		
 		return $this->modules();
+	}
+
+	/**
+	 * Namespaces sorted descending so the most-specific prefix wins on first match.
+	 *
+	 * @return array<string, ModuleConfig>
+	 */
+	protected function namespaceIndex(): array
+	{
+		return $this->namespace_index ??= $this->modules()
+			->flatMap(fn(ModuleConfig $module) => $module->namespaces->mapWithKeys(fn(string $namespace) => [$namespace => $module]))
+			->sortKeysDesc()
+			->all();
 	}
 	
 	protected function extractModuleNameFromPath(string $path): string
